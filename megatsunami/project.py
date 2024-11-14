@@ -1,0 +1,2 @@
+#the answer to the first question is that the boundary on gamma 0 is an essential  boundary conditionif you want the term to vanish at the boundary. since the variation is between the path of the two points and not at the points self
+#since the normal gradient term doesnt vanish at the boundary of gamma 1 so 
