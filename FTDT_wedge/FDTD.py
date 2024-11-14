@@ -42,7 +42,7 @@ nt = nx // CFL
 global ox, oy, p
 ox = np.zeros((nx+1, ny),dtype=np.float64)
 oy = np.zeros((nx, ny+1),dtype=np.float64)                 # when memory problems arise, can try float32
-p = np.zeros((nx, ny),dtype=np.float64)                    # can sometimes leads to errors in the animation and overflow...
+p = np.zeros((nx, ny),dtype=np.float64)                    # can sometimes lead to errors in the animation and overflow...
 
 #### source and reciever positions####---------------------------------------------------------------------------------------------------------
 x_source=int(nx/8)
