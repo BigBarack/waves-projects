@@ -15,25 +15,29 @@ def step_SIT_SIP(nx, ny, c, dx, dy, dt):
     return ox,oy,p
 d = 1           #arbitrary value for d
 c = 340         #speed of sound
-A = 5           #source amplitude (arbitrary)
+A = 1           #source amplitude (arbitrary)
 
 f_min=c * 0.1 /(np.pi*d)
 f_max=c * 4 /(np.pi*d)
 fc = (f_min + f_max ) / 2               # central frequency
 bandwidth = f_max - f_min
+l_min = np.pi * d / 2
+l_max = np.pi * d * 20
 
-t0 = 2.5E-2                                     # time delay, determines when pulse is emitted, in continuous source (no exp windowing) it changes the phase
+t0 = 1E-3                                    # time delay, determines when pulse is emitted, in continuous source (no exp windowing) it changes the phase
 sigma = (1 / (2 * bandwidth)) **2               # determines width of pulse. according to literature, bandwidth=1/(2*np.sqrt(sigma))
-dx = 0.1 * c / fc                               # spatial discretisation step = 1/10 of lamda, maybe should be from lamda_min
+dx = 0.1 * l_min                           # spatial discretisation step = 1/10 of lamda_min
 dy = dx
+#can reduce dx a bit further to correct diagonal propagation
 
-#nx = int((1*20*np.pi*a )//dx)                 # will need to be expanded due to pml thickness once implemented
-nx = int( 4 * d / dx)                           # want to sim at least 4 d square . to be adjusted later for pml
+#nw  will need to be expanded due to pml thickness once implemented
+nx = int( l_max  / dx)
 ny = nx
 CFL = 1
 
+
 dt = CFL / (c * np.sqrt((1 / dx ** 2)+(1 / dy ** 2)))      # time step from spatial disc. & CFL
-nt = nx // CFL
+nt = int(nx // CFL)
 
 ####PML implementation####--------------------------------------------------------------------------------------------------------------------
 #(2)
@@ -45,9 +49,11 @@ oy = np.zeros((nx, ny+1),dtype=np.float64)                 # when memory problem
 p = np.zeros((nx, ny),dtype=np.float64)                    # can sometimes lead to errors in the animation and overflow...
 
 #### source and reciever positions####---------------------------------------------------------------------------------------------------------
-x_source=int(nx/8)
+#x_source=int(nx/8)
+#y_source=int(ny/2)         # source d/2 from the left, center in y means 1 d on top air, the rest 3d are blocked
+x_source=int(nx/2)
 y_source=int(ny/2)
-# source d/2 from the left, center in y means 1 d on top air, the rest 3d are blocked
+
 
 x_rec1 = int(x_source + d / dx)
 y_rec1 = y_source + int( 1.5 * d / dx)
@@ -78,11 +84,11 @@ for it in range(0, nt):
                                                                         # helpful to identify problematic iterations during debugging
     source = A*np.sin(2*np.pi*fc*(t-t0))*np.exp(-((t-t0)**2)/(sigma))     # update source for new time
 
-    p[x_source,x_source] += source                    # adding source term to propagation
+    p[x_source,y_source] += source                    # adding source term to propagation
     step_SIT_SIP(nx,ny,c,dx,dy,dt)                                        # propagate over one time step
 
-    receiver1[it] = p[x_rec1,y_rec1]                                         # store p field at receiver location
-    receiver2[it] = p[x_rec2,y_rec2]                                       # store p field at reference location
+    receiver1[it] = p[x_rec1,y_rec1]                                         # store p field at receiver locations
+    receiver2[it] = p[x_rec2,y_rec2]                                      
     receiver3[it] = p[x_rec3, y_rec3]
       # presenting the p field
 
@@ -92,10 +98,10 @@ for it in range(0, nt):
                       ha="center", transform=ax.transAxes, ),
         ax.imshow(p, vmin=-0.02*A, vmax=0.02*A),                                   #original animation code
         #ax.imshow(np.clip(p, -0.02*A, 0.02*A)),                                   #by clipping the values inside this range, the error no longer persists
-        ax.plot(x_source,y_source,'ks',fillstyle="none")[0],
-        ax.plot(x_rec1,y_rec1,'ro',fillstyle="none")[0],
+        ax.plot(x_source,y_source,'rs',fillstyle="none")[0],
+        ax.plot(x_rec1,y_rec1,'ko',fillstyle="none")[0],
         ax.plot(x_rec2,y_rec2,'ko',fillstyle="none")[0],
-        ax.plot(x_rec3, y_rec3, 'b-', lw=0.5)[0],
+        ax.plot(x_rec3,y_rec3,'ko',fillstyle="none")[0],
 
           ]
     movie.append(artists)
