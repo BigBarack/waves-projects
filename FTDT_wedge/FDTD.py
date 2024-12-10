@@ -12,7 +12,7 @@ def step_SIT_SIP(nx, ny, c, dx, dy, dt):
     p += -c**2*dt*(1/dx*(ox[1:, :] - ox[:-1, :]) + 1/dy*(oy[:, 1:] - oy[:, :-1]))
     return None
 
-    return ox,oy,p
+    
 d = 1           #arbitrary value for d
 c = 340         #speed of sound
 A = 1           #source amplitude (arbitrary)
