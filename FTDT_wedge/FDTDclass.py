@@ -8,8 +8,6 @@ class FDTD():
     def __init__(self):
              #all the physical constants we need
             self.c = 340 #[m/s] speed of sound
-
-
             #miscelaneous
             self.t0 =1E-3 #time delay
         
@@ -22,8 +20,7 @@ class FDTD():
             self.oy = np.zeros((self.nx, self.ny+1),dtype=np.float64)                 # when memory problems arise, can try float32
             self.p = np.zeros((self.nx, self.ny),dtype=np.float64)     
 
-            #all the physical constants we need
-            self.c = 340 #[m/s] speed of sound
+    
 
 
             #receivers and sources 
@@ -45,7 +42,7 @@ class FDTD():
 
         """
         do this before discritization
-        also this also initializng the parameters of the wavesource 
+        also this also before initializng the parameters of the wavesource 
         """
 
         self.d=d
@@ -93,18 +90,19 @@ class FDTD():
     
 
     def PML(self,sigmamax=0.17):
+         
          #thickness needs to be small relatively to nx
          self.thickness=  max(1,self.nx//10)
 
 
-        # damping coëfficients   
+        # damping coëfficient grid in x and t   
          
          
          self.dampx=np.zeros(self.nx + 1) 
          self.dampy=np.zeros(self.ny + 1)
 
 
-         def profile(index,thickness,sigmamax):
+         def profile(index,thickness,sigmamax): 
               return sigmamax * ( (index /thickness) )
 
 
@@ -167,7 +165,6 @@ class FDTD():
                                 blit=True)
         plt.show()
         return None
-
 
 
 
