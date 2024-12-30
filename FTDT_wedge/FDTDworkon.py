@@ -1,154 +1,206 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import ArtistAnimation
+from scipy import ndimage
+
+class FDTD:
+
+    def __init__(self,resolution = 0.1, domain_to_lmax = 1):
+        """
+        initialize instance of FDTD
+        :param resolution: for dx
+        :param domain_to_lmax: for nx
+        """
+        # constants needed
+        self.c = 340  # [m/s] speed of sound
+        self.t0 = 1E-3  # time delay of pulse
+        self.d=1
+        self.A = 1  # Source amplitude
+        self.wedge = None
+        # frequency band of interest
+        self.f_min = self.c * 0.1 / (np.pi * self.d)
+        self.f_max = self.c * 4 / (np.pi * self.d)
+        self.fc = (self.f_min + self.f_max) / 2  # central frequency
+        self.bandwidth = self.f_max - self.f_min
+        self.l_min = np.pi * self.d / 2
+        self.l_max = np.pi * self.d * 20
+        self.sigma = (1 / (2 * self.bandwidth)) ** 2  # width of pulse according to literature
+        # discretization
+        self.dx = resolution * self.l_min          # can still reduce dx to fix diagonal propagation
+        self.dy = self.dx
+        self.nx = int(domain_to_lmax * self.l_max / self.dx)
+        self.ny = self.nx
+        self.CFL = 1
+        self.dt = self.CFL / (
+                    self.c * np.sqrt((1 / self.dx ** 2) + (1 / self.dy ** 2)))  # time step from spatial disc. & CFL
+        self.nt = int(self.nx // self.CFL)
+        # initialize the fields
+        self.ox = np.zeros((self.nx + 1, self.ny), dtype=np.float64)
+        self.oy = np.zeros((self.nx, self.ny + 1), dtype=np.float64)  # if memory problems arise, can try float32
+        self.p = np.zeros((self.nx, self.ny), dtype=np.float64)
+        # receivers and sources
+        self.x_source = int(self.nx / 2)  # Source is at the center
+        self.y_source = int(self.ny / 2)
+
+        self.x_rec1 = int(self.x_source + self.d / self.dx)
+        self.y_rec1 = self.y_source + int(1.5 * self.d / self.dx)
+        self.x_rec2 = int(self.x_source + 2 * self.d / self.dx)
+        self.y_rec2 = self.y_rec1
+        self.x_rec3 = int(self.x_source + 3 * self.d / self.dx)
+        self.y_rec3 = self.y_rec1
 
 
-def initialize_pml(nx, ny, thickness, sigma_max):
-    """
-    Initializes PML profiles for both velocity components and pressure fields.
-    
-    Parameters:
-    - nx, ny: Grid dimensions.
-    - thickness: Thickness of the PML in grid points.
-    - sigma_max: Maximum conductivity in the PML.
 
-    Returns:
-    - sigma_x, sigma_y: Conductivity profiles for the x and y directions.
-    """
-    sigma_x = np.zeros((nx + 1, ny))
-    sigma_y = np.zeros((nx, ny + 1))
+    def step_sit_sip(self):
 
-    for i in range(thickness):
-        absorption = sigma_max * ((thickness - i) / thickness) ** 2
-        sigma_x[i, :] = sigma_x[-i - 1, :] = absorption
-        sigma_y[:, i] = sigma_y[:, -i - 1] = absorption
+        # need to change these to update slicing upto 1 cell before the wedge (1)
+        self.ox[1:-1, :] += -self.dt / self.dx * (self.p[1:, :] - self.p[:-1, :]) * np.exp(-self.dampx[1:-1, None])
+        self.oy[:, 1:-1] += -self.dt / self.dy * (self.p[:, 1:] - self.p[:, :-1]) * np.exp(-self.dampx[None, 1:-1, ])
+        self.p += -self.c ** 2 * self.dt * (
+                    1 / self.dx * (self.ox[1:, :] - self.ox[:-1, :]) * np.exp(-self.dampx[:-1, None]) +
+                    + 1 / self.dy * (self.oy[:, 1:] - self.oy[:, :-1]) * np.exp(-self.dampy[None, 1:])
+                    )
+        self.ox = self.ox * np.exp(-self.dampx[:, None])
+        self.oy = self.oy * np.exp(-self.dampy[None:, ])
+        self.p = self.p * np.exp(- self.dampx[:-1, None])
+        if self.wedge != None:
+            self.p[self.mask_p == 1] = 0
+        return None
 
-    return sigma_x, sigma_y
+    def pml(self, sigmamax=0.17,thickness_denom = 10, pml_order = 1,prof_type = 'polynomial',scale=1):
+        """
+        pml_order: profile of pml; higher order means less reflections from inner side
+        prof_type: either polynomial or exponential
+        scale: to further reduce lattice mismatch of inner side of PML
+        """
+        # thickness needs to be small relatively to nx
+        self.pml_thickness = max(1, self.nx // thickness_denom)
+        # damping coëfficient grid in x and y
+        self.dampx = np.zeros(self.nx + 1)
+        self.dampy = np.zeros(self.ny + 1)
+        def profile(index, thickness, sigmamax,pml_order,prof_type,scale):
+            return sigmamax * ((index / thickness) ** pml_order) if prof_type == 'polynomial' else (
+                    sigmamax * (1 - np.exp(-pml_order * (index / thickness)**scale)))
 
+        # only uses the values in the pml layer so that the non pml layer doesnt get affected
+        for i in range(self.pml_thickness):
+            sigma_value = profile(i, self.pml_thickness, sigmamax, pml_order, prof_type, scale)
 
-def step_SIT_SIP_PML(nx, ny, c, dx, dy, dt, sigma_x, sigma_y):
-    """
-    Updates the fields in the simulation, including the PML terms.
-    
-    Parameters:
-    - nx, ny: Grid dimensions.
-    - c: Wave propagation speed.
-    - dx, dy: Spatial steps.
-    - dt: Time step.
-    - sigma_x, sigma_y: Conductivity profiles for x and y directions.
-    """
-    global ox, oy, p
+            self.dampx[i] = sigma_value
+            self.dampx[-(i + 1)] = sigma_value
+            self.dampy[i] = sigma_value
+            self.dampy[-(i + 1)] = sigma_value
+            #print(self.dampx)          #debugger, inside values higher??
+        return None
 
-    # Update ox field
-    ox[1:-1, :] = (1 - sigma_x[1:-1, :] * dt) * ox[1:-1, :] - dt / dx * (p[1:, :] - p[:-1, :])
+    def wedge_mask(self,angle=0):
+        self.wedge = 1
+        wedge_start_x = self.x_rec1
+        wedge_start_y = self.y_source - int(1 * self.d / self.dx)
+        #wedge_start_y, wedge_start_x = wedge_start_x, wedge_start_y
+        self.mask_p = np.zeros((self.nx,self.ny))
+        self.mask_p[wedge_start_y+1:,wedge_start_x+1:] = 1       #not including perimeter
+        self.mask_p = np.flipud(self.mask_p)
+        if angle != 0:
+            self.mask_p = ndimage.rotate(self.mask_p,-angle,reshape=False,order=0)   #fix ever-extending
+            #code_block to fix locations of source and receiver
+            def rotate_xy(x,y,theta,nx,ny):
+                c_x = nx / 2
+                c_y = ny / 2
+                shifted_x = x - c_x
+                shifted_y = y - c_y
+                rad_angle = np.deg2rad(theta)
+                rotation_matrix = np.array([[np.cos(rad_angle), -np.sin(rad_angle)], [np.sin(rad_angle), np.cos(rad_angle)]])
+                original_vector = np.array([shifted_x,shifted_y])   #position vector; to be rotated
+                rotated = rotation_matrix @ original_vector
+                new_x = rotated[0] + c_x
+                new_y = rotated[1] + c_y
+                return tuple(np.round([new_x,new_y]).astype(int))
 
-    # Update oy field
-    oy[:, 1:-1] = (1 - sigma_y[:, 1:-1] * dt) * oy[:, 1:-1] - dt / dy * (p[:, 1:] - p[:, :-1])
-
-    # Update pressure field
-    p += -c**2 * dt * (
-        (1 / dx) * (ox[1:, :] - ox[:-1, :]) +
-        (1 / dy) * (oy[:, 1:] - oy[:, :-1])
-    )
-
-    # Apply boundary conditions (reflection-free)
-    p[0, :] = p[-1, :] = 0
-    p[:, 0] = p[:, -1] = 0
-
-
-# Constants and Initialization
-d = 1
-c = 340  # Speed of sound
-A = 1  # Source amplitude
-f_min = c * 0.1 / (np.pi * d)
-f_max = c * 4 / (np.pi * d)
-fc = (f_min + f_max) / 2
-bandwidth = f_max - f_min
-l_min = np.pi * d / 2
-l_max = np.pi * d * 20
-
-t0 = 1e-3
-sigma = (1 / (2 * bandwidth))**2
-dx = 0.1 * l_min
-dy = dx
-nx = int(l_max / dx)
-ny = nx
-CFL = 1
-dt = CFL / (c * np.sqrt((1 / dx**2) + (1 / dy**2)))
-nt = int(nx // CFL)
-
-# Initialize Fields and PML
-thickness = int(0.1 * nx)  # 10% of grid size as PML thickness
-sigma_max = 50 # Maximum conductivity
-sigma_x, sigma_y = initialize_pml(nx, ny, thickness, sigma_max)
-
-global ox, oy, p
-ox = np.zeros((nx + 1, ny), dtype=np.float64)
-oy = np.zeros((nx, ny + 1), dtype=np.float64)
-p = np.zeros((nx, ny), dtype=np.float64)
-
-# Source and Receivers
-x_source, y_source = nx // 2, ny // 2
-x_rec1, y_rec1 = int(x_source + d / dx), int(y_source + 1.5 * d / dx)
-
-# Initialize Visualization
-fig, ax = plt.subplots()
-plt.axis("equal")
-plt.xlim([0, nx])
-plt.ylim([0, ny])
-movie = []
-
-# FDTD Iteration
-for it in range(nt):
-    t = it * dt
-    source = A * np.sin(2 * np.pi * fc * (t - t0)) * np.exp(-((t - t0)**2) / sigma)
-    p[x_source, y_source] += source
-
-    # Update Fields
-    step_SIT_SIP_PML(nx, ny, c, dx, dy, dt, sigma_x, sigma_y)
-
-    # Visualization
-    artists = [
-        ax.text(0.5, 1.05, f"Step {it}/{nt}", size=12, ha="center", transform=ax.transAxes),
-        ax.imshow(p, vmin=-0.02 * A, vmax=0.02 * A),
-    ]
-    movie.append(artists)
-
-# Create Animation
-print("Simulation complete.")
-my_anim = ArtistAnimation(fig, movie, interval=10, repeat_delay=1000, blit=True)
-plt.show()
+            print(self.x_source,self.y_source)  #debug
+            self.x_source, self.y_source = rotate_xy(self.x_source, self.y_source, angle,self.nx,self.ny)
+            print(self.x_source, self.y_source) #debug
+            self.x_rec1, self.y_rec1 = rotate_xy(self.x_rec1, self.y_rec1, angle,self.nx,self.ny)
+            self.x_rec2, self.y_rec2 = rotate_xy(self.x_rec2, self.y_rec2, angle,self.nx,self.ny)
+            self.x_rec3, self.y_rec3 = rotate_xy(self.x_rec3, self.y_rec3, angle,self.nx,self.ny)
 
 
-#this was our fft at the end last year, to be seen if we will need any parts of it
-"""
-####post processing
-def fourier_transform_frequency_band(delta_t, f, f_min, f_max, axis=0):     # function to analyze the frequency responce for signal f
-    F = np.fft.fft(f, axis=axis)                                            # Compute the Fourier Transform
-    N = f.shape[axis]                                                       # Compute the frequency bins
-    freq = np.fft.fftfreq(N, delta_t)                                       # Take only the positive frequencies up to N//2 (due to symmetry in the FFT of real signals)
-    F_positive = F[:N//2]
-    freq_positive = freq[:N//2]
-    mask = (freq_positive >= f_min) & (freq_positive <= f_max)              # Limit the spectrum to frequencies within the specified band [f_min, f_max]
-    F_band = F_positive[mask]
-    freq_band = freq_positive[mask]
-    return freq_band, F_band
 
-freq_receiver, F_receiver = fourier_transform_frequency_band(dt, receiver, f_min, f_max)
-freq_reference, F_reference = fourier_transform_frequency_band(dt, reference, f_min, f_max)
-ratio_amplitudes = np.abs(F_receiver / F_reference)
-plt.plot(freq_receiver, ratio_amplitudes)
-plt.xlabel('Frequency (Hz)')
-plt.ylabel('Pressure Ratio (Receiver / Reference)')
-plt.title(f'P-field Ratio for d = {undulation} * a')
-plt.show()
-"""
+        print(self.mask_p)                  #debugger
 
-"""
-issues:
-(1) slice properly
-(2) implement PML
-(3) nx is too low, getting stuck on something stupid probably 
-"""
+    def debugger(self):
+        fig, ax1 = plt.subplots(figsize=(8, 8))
+        #plt.imshow(self.mask_p, origin='lower', cmap='gray')
+        # Plot source and receivers with same style as animation
+        ax1.contourf(self.mask_p, levels=[0.5, 1], colors='black', linestyles='--')
+        ax1.plot(self.x_source, self.y_source, 'rs', fillstyle="none", label='Source')
+        ax1.plot(self.x_rec1, self.y_rec1, 'ko', fillstyle="none", label='Receiver 1')
+        ax1.plot(self.x_rec2, self.y_rec2, 'ko', fillstyle="none", label='Receiver 2')
+        ax1.plot(self.x_rec3, self.y_rec3, 'ko', fillstyle="none", label='Receiver 3')
+        plt.title('Mask Placement with source and receivers')
+        plt.show()
+
+        
+    def iterate(self):
+        receiver1 = np.zeros((self.nt, 1))
+        receiver2 = np.zeros((self.nt, 1))
+        receiver3 = np.zeros((self.nt, 1))
+        timeseries = np.zeros((self.nt, 1))
+
+        fig, ax = plt.subplots()
+        plt.axis('equal')
+        plt.xlim([1, self.nx + 1])
+        plt.ylim([1, self.ny + 1])
+        movie = []
+
+        for it in range(0, self.nt):
+            t = (it - 1) * self.dt
+            timeseries[it, 0] = t
+            print('%d/%d' % (it, self.nt))  # Loading bar while sim is running
+
+            # Update source for new time
+            source = self.A * np.sin(2 * np.pi * self.fc * (t - self.t0)) * np.exp(
+                -((t - self.t0) ** 2) / self.sigma)
+            self.p[self.x_source, self.y_source] += source  # Adding source term
+            self.step_sit_sip()  # Propagate over one time step
+
+            # Store p field at receiver locations
+            receiver1[it] = self.p[self.x_rec1, self.y_rec1]
+            receiver2[it] = self.p[self.x_rec2, self.y_rec2]
+            receiver3[it] = self.p[self.x_rec3, self.y_rec3]
+
+            # Create frame for animation
+            artists = [
+                ax.text(0.5, 1.05, '%d/%d' % (it, self.nt),
+                        size=plt.rcParams["axes.titlesize"],
+                        ha="center", transform=ax.transAxes),
+                ax.imshow(self.p, vmin=-0.02 * self.A, vmax=0.02 * self.A, origin='lower'),  # Display pressure field
+                ax.plot(self.x_source, self.y_source, 'rs', fillstyle="none")[0],
+                ax.plot(self.x_rec1, self.y_rec1, 'ko', fillstyle="none")[0],
+                ax.plot(self.x_rec2, self.y_rec2, 'ko', fillstyle="none")[0],
+                ax.plot(self.x_rec3, self.y_rec3, 'ko', fillstyle="none")[0]
+            ]
+            
+            # Add mask visualization if wedge is present
+            if self.wedge is not None:
+                artists.append(ax.imshow(self.mask_p, cmap="gray", alpha=0.5, origin="lower"))
+            
+            movie.append(artists)
+
+        print('iterations done')
+        my_anim = ArtistAnimation(fig, movie, interval=10, repeat_delay=1000, blit=True)
+        plt.show()
+        return None
+
+problem = FDTD(0.1, 1)
+
+problem.pml(sigmamax=0.15, thickness_denom=6, pml_order=12, prof_type='apolynomial', scale=4)
+problem.wedge_mask(30)
+problem.debugger()
+problem.iterate()
 
 
+#(1) work on surfaces; implement way to detect perimeter using ndimage.dilate to automaticaly slice 
+#(2) extend mask
+#(3) work out PML kinks
+#(4) compare analytical
