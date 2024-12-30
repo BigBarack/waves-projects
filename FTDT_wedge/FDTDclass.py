@@ -97,13 +97,78 @@ class FDTD:
         self.wedge = 1
         wedge_start_x = self.x_rec1
         wedge_start_y = self.y_source - int(1 * self.d / self.dx)
-        #wedge_start_y, wedge_start_x = wedge_start_x, wedge_start_y
         self.mask_p = np.zeros((self.nx,self.ny))
         self.mask_p[wedge_start_y+1:,wedge_start_x+1:] = 1       #not including perimeter
         self.mask_p = np.flipud(self.mask_p)
         if angle != 0:
-            self.mask_p = ndimage.rotate(self.mask_p,-angle,reshape=False,order=0)   #fix ever-extending
-            #code_block to fix locations of source and receiver
+            # xt = 1.4
+            # new_nx = int(self.nx * xt)
+            # new_ny = int(self.ny * xt)
+            # extended_mask = np.ones((new_nx, new_ny))
+            # extended_mask[int(wedge_start_y*xt)+14:,:] = 0
+            # extended_mask[:,:int(wedge_start_x*xt)] = 0
+            # #extended_mask[wedge_start_y+1:,wedge_start_x+1:] = 1
+            # #extended_mask = np.flipud(extended_mask)
+            # self.extended = extended_mask                  #DEBUG 1, EARLY
+            # offset_x = (new_nx - self.nx) // 2
+            # offset_y = (new_ny - self.ny) // 2
+            # #extended_mask[offset_x:offset_x + self.nx, offset_y:offset_y + self.ny] = self.mask_p
+            #
+            #
+            #
+            # #testing
+            #
+            #
+            #
+            # #rot
+            # rotated_mask = ndimage.rotate(extended_mask, angle, reshape=False, order=0)
+            # self.rot = rotated_mask
+            # #crop
+            # # Calculate cropping indices
+            # crop_x_start = (rotated_mask.shape[0] - self.nx) // 2
+            # crop_x_end = crop_x_start + self.nx
+            # crop_y_start = (rotated_mask.shape[1] - self.ny) // 2
+            # crop_y_end = crop_y_start + self.ny
+            # self.mask_p = rotated_mask[crop_x_start:crop_x_end, crop_y_start:crop_y_end]
+            #
+            # np.clip(self.mask_p, 0, 1)
+            #
+            # #self.mask_p = ndimage.rotate(self.mask_p,angle,reshape=False,order=0)   #OLD CODE, before extention of wedge
+            # #code_block to fix locations of source and receiver
+
+            # Extend the mask to prevent information loss during rotation
+            xt = 1.4  # Scaling factor for the extended mask size
+            new_nx = int(self.nx * xt)
+            new_ny = int(self.ny * xt)
+            extended_mask = np.zeros((new_nx, new_ny))
+
+            # Position the wedge mask in the top-left of the extended array
+            offset_x = (new_nx - self.nx) // 2
+            offset_y = (new_ny - self.ny) // 2
+            extended_mask[offset_x:offset_x + self.nx, offset_y:offset_y + self.ny] = self.mask_p
+
+            # Ensure the wedge shape fills the grid up to its edges
+            wedge_start_y = offset_y + self.y_source - int(self.d / self.dx)
+            wedge_start_x = offset_x + self.x_rec1
+            extended_mask[wedge_start_y + 1:, wedge_start_x + 1:] = 1
+            extended_mask[:wedge_start_y + 1, :] = 0  # Clear parts above the wedge
+            extended_mask = np.flipud(extended_mask)
+
+            # Rotate the mask using ndimage.rotate
+            rotated_mask = ndimage.rotate(extended_mask, angle, reshape=False, order=0)
+
+            # Crop the rotated mask back to the original size
+            crop_x_start = offset_x
+            crop_x_end = offset_x + self.nx
+            crop_y_start = offset_y
+            crop_y_end = offset_y + self.ny
+            self.mask_p = rotated_mask[crop_x_start:crop_x_end, crop_y_start:crop_y_end]
+
+            # Threshold to ensure binary mask (values can be fractional after rotation)
+            np.clip(self.mask_p, 0, 1)
+
+
+
             def rotate_xy(x,y,theta,nx,ny):
                 c_x = nx / 2
                 c_y = ny / 2
@@ -117,28 +182,32 @@ class FDTD:
                 new_y = rotated[1] + c_y
                 return tuple(np.round([new_x,new_y]).astype(int))
 
-            print(self.x_source,self.y_source)  #debug
-            self.x_source, self.y_source = rotate_xy(self.x_source, self.y_source, angle,self.nx,self.ny)
-            print(self.x_source, self.y_source) #debug
-            self.x_rec1, self.y_rec1 = rotate_xy(self.x_rec1, self.y_rec1, angle,self.nx,self.ny)
-            self.x_rec2, self.y_rec2 = rotate_xy(self.x_rec2, self.y_rec2, angle,self.nx,self.ny)
-            self.x_rec3, self.y_rec3 = rotate_xy(self.x_rec3, self.y_rec3, angle,self.nx,self.ny)
+
+            self.x_source, self.y_source = rotate_xy(self.x_source, self.y_source, -angle,self.nx,self.ny)
+
+            self.x_rec1, self.y_rec1 = rotate_xy(self.x_rec1, self.y_rec1, -angle,self.nx,self.ny)
+            self.x_rec2, self.y_rec2 = rotate_xy(self.x_rec2, self.y_rec2, -angle,self.nx,self.ny)
+            self.x_rec3, self.y_rec3 = rotate_xy(self.x_rec3, self.y_rec3, -angle,self.nx,self.ny)
 
 
 
-        print(self.mask_p)                  #debugger
 
     def debugger(self):
         fig, ax1 = plt.subplots(figsize=(8, 8))
         #plt.imshow(self.mask_p, origin='lower', cmap='gray')
         # Plot source and receivers with same style as animation
-        ax1.contourf(self.mask_p, levels=[0.5, 1], colors='black', linestyles='--')
+        ax1.contourf(self.mask_p, levels=[0.5, 1], colors='yellow', linestyles='--')
+        #ax1.contour(self.extended, levels=[0.5], colors='black', linestyles='--')
+        #ax1.contour(self.rot, levels=[0.5], colors='black', linestyles='--')
+        #ax1.contourf(self.extended, levels=[0.5, 1], colors='yellow', linestyles='--')
         ax1.plot(self.x_source, self.y_source, 'rs', fillstyle="none", label='Source')
         ax1.plot(self.x_rec1, self.y_rec1, 'ko', fillstyle="none", label='Receiver 1')
         ax1.plot(self.x_rec2, self.y_rec2, 'ko', fillstyle="none", label='Receiver 2')
         ax1.plot(self.x_rec3, self.y_rec3, 'ko', fillstyle="none", label='Receiver 3')
         plt.title('Mask Placement with source and receivers')
         plt.show()
+
+
 
     def iterate(self):
         receiver1 = np.zeros((self.nt, 1))
@@ -193,12 +262,13 @@ class FDTD:
 problem = FDTD(0.1, 1)
 
 problem.pml(sigmamax=0.15, thickness_denom=6, pml_order=12, prof_type='apolynomial', scale=4)
-problem.wedge_mask(30)
+
+problem.wedge_mask(0)
 problem.debugger()
 problem.iterate()
 
 
-#(1) work on surfaces; implement way to detect perimeter using ndimage.dilate to automaticaly slice 
-#(2) extend mask
+#(1) work on surfaces; implement way to detect perimeter using ndimage.dilate to automaticaly slice
+#(2) extend mask - DONE
 #(3) work out PML kinks
 #(4) compare analytical
