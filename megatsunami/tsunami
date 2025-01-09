@@ -1,0 +1,21 @@
+//+
+// Set OpenCASCADE as the factory for robust geometry handling
+SetFactory("OpenCASCADE");
+
+// Define the main rectangle
+Rectangle(1) = {0, 0, 0, 10, 10, 0}; // Large rectangle
+Rectangle(2) = {4, 4, 0, 2, 2, 0};   // Smaller rectangle inside
+
+// Delete unnecessary parts
+BooleanDifference{ Surface{1}; Delete; }{ Surface{2}; Delete; } // Subtract small from large
+
+// Extract boundary curves
+Curve Loop(1) = {1, 2, 3, 4}; // Outer boundary
+Curve Loop(2) = {5, 6, 7, 8}; // Inner rectangle boundary
+
+// Physical Groups for boundaries (for boundary conditions)
+Physical Curve("OuterBoundary") = {1, 2, 3, 4}; // Outer boundary
+Physical Curve("InnerBoundary") = {5, 6, 7, 8}; // Inner boundary
+
+// Define Physical Surfaces for simulation domains
+Physical Surface("OuterDomain") = {1}; // Main simulation domain

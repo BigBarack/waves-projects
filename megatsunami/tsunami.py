@@ -8,7 +8,7 @@ import scipy.sparse.linalg as spla
 # Initialize Gmsh
 gmsh.initialize()
 gmsh.model.add("Mega-Tsunami")
-gmsh.write("mega_tsunami_mesh.msh", format="msh2")
+gmsh.write("mega_tsunami_mesh.msh")
 # Define Geometry: Outer ocean and inner coastal lines
 outer_square = gmsh.model.occ.addRectangle(0, 0, 0, 10, 10)  # Large ocean domain
 inner_square = gmsh.model.occ.addRectangle(3, 3, 0, 4, 4)    # Small coastal region
